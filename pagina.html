@@ -1,0 +1,298 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Editor de permisos — Claude Code</title>
+<style>
+  /* Estilos simples, sin nada externo. */
+  * { box-sizing: border-box; }
+  body { font-family: system-ui, Arial, sans-serif; margin: 0; background: #f4f4f2; color: #222; }
+  header { background: #1f2937; color: #fff; padding: 16px 20px; }
+  header h1 { margin: 0 0 6px 0; font-size: 22px; }
+  header p { margin: 4px 0; font-size: 14px; color: #d1d5db; }
+  main { max-width: 1100px; margin: 0 auto; padding: 16px; }
+  .regla-oro { background: #fff7cc; border: 1px solid #e5c200; padding: 10px 12px; border-radius: 8px; }
+  .presets { margin: 16px 0; display: flex; gap: 8px; flex-wrap: wrap; }
+  button { cursor: pointer; border: none; border-radius: 8px; padding: 10px 16px; font-size: 15px; }
+  .preset { background: #fff; border: 2px solid #1f2937; }
+  .preset.activo { background: #1f2937; color: #fff; }
+  .guardar { background: #15803d; color: #fff; font-weight: bold; }
+  .secundario { background: #e5e7eb; color: #111; }
+  .columnas { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 12px; }
+  @media (max-width: 800px) { .columnas { grid-template-columns: 1fr; } }
+  .columna { background: #fff; border-radius: 10px; padding: 12px; border-top: 6px solid #999; }
+  .columna.permitir { border-top-color: #16a34a; }
+  .columna.preguntar { border-top-color: #d97706; }
+  .columna.negar { border-top-color: #dc2626; }
+  .columna h2 { margin: 0 0 4px 0; font-size: 18px; }
+  .columna .desc { font-size: 13px; color: #555; margin: 0 0 10px 0; }
+  .regla { border: 1px solid #ddd; border-radius: 8px; padding: 8px; margin-bottom: 8px; }
+  .regla input { width: 100%; font-size: 15px; padding: 6px; border: 1px solid #ccc; border-radius: 6px; }
+  .regla .que-hace { font-size: 13px; color: #444; margin: 6px 0 0 0; }
+  .regla .borrar { background: none; color: #dc2626; padding: 2px 6px; font-size: 13px; float: right; }
+  .agregar { display: flex; gap: 6px; margin-top: 8px; }
+  .agregar input { flex: 1; font-size: 14px; padding: 8px; border: 1px solid #ccc; border-radius: 6px; }
+  .agregar button { background: #1f2937; color: #fff; padding: 8px 12px; }
+  .acciones { margin: 16px 0; display: flex; gap: 8px; flex-wrap: wrap; }
+  #mensaje { margin: 12px 0; padding: 10px 12px; border-radius: 8px; display: none; }
+  #mensaje.ok { display: block; background: #dcfce7; border: 1px solid #16a34a; }
+  #mensaje.error { display: block; background: #fee2e2; border: 1px solid #dc2626; }
+  #avisos { margin: 0 0 12px 0; padding: 10px 12px; border-radius: 8px; background: #fff7cc; border: 1px solid #e5c200; display: none; }
+  #avisos li { margin: 4px 0; }
+  pre#json { background: #111827; color: #e5e7eb; padding: 12px; border-radius: 8px; overflow: auto; display: none; font-size: 13px; }
+  footer { font-size: 13px; color: #555; margin-top: 20px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Editor de permisos para Claude Code</h1>
+  <p>Decidí qué puede hacer el agente antes de que arranque. Todo queda en tu PC.</p>
+  <p>Las reglas se guardan en <b>settings.json</b>, el archivo real que lee Claude Code.</p>
+</header>
+
+<main>
+  <div class="regla-oro">
+    <b>La regla de oro:</b> si una regla está en <b>Negar</b> y también en otra lista, <b>gana Negar</b>.
+    Después gana Preguntar y por último Permitir. Por eso lo peligroso va en Negar.
+  </div>
+
+  <div class="presets">
+    <span>Empezar con un preset:</span>
+    <button class="preset" data-preset="seguro">Seguro</button>
+    <button class="preset" data-preset="equilibrado">Equilibrado</button>
+    <button class="preset" data-preset="libre">Libre</button>
+  </div>
+
+  <div class="columnas" id="columnas"></div>
+
+  <div class="acciones">
+    <button class="guardar" id="btn-guardar">Guardar en settings.json</button>
+    <button class="secundario" id="btn-json">Ver el JSON</button>
+    <button class="secundario" id="btn-descargar">Descargar settings.json</button>
+    <button class="secundario" id="btn-recargar">Recargar desde el archivo</button>
+  </div>
+
+  <div id="mensaje"></div>
+  <ul id="avisos"></ul>
+  <pre id="json"></pre>
+
+  <footer>
+    Para usarlo con Claude Code: copiá <b>settings.json</b> de esta carpeta a tu
+    carpeta <b>.claude</b> (en Windows: <b>C:\Users\TU_USUARIO\.claude\settings.json</b>).
+    Los cambios que guardes acá se escriben en el archivo de esta carpeta.
+  </footer>
+</main>
+
+<script>
+// ---------- Datos ----------
+
+// Los tres presets. Cada uno es un juego completo de reglas.
+var PRESETS = {
+  seguro: {
+    allow: ["Read", "Glob", "Grep", "Bash(npm run test)", "Bash(npm run build)", "Bash(python -m pytest *)"],
+    ask: ["Edit", "Write", "Bash(git *)", "Bash(npm install *)", "WebFetch", "WebSearch"],
+    deny: ["Bash(rm *)", "Bash(sudo *)", "Bash(git push *)", "Read(./.env)", "Edit(./.env)", "Bash(chmod *)"]
+  },
+  equilibrado: {
+    allow: ["Read", "Glob", "Grep", "Edit", "Write", "Bash(npm run *)", "Bash(git status)", "Bash(git diff)", "Bash(git log *)", "Bash(python *)", "WebFetch", "WebSearch"],
+    ask: ["Bash(git push *)", "Bash(git commit *)", "Bash(npm install *)", "Bash(pip install *)"],
+    deny: ["Bash(rm -rf *)", "Bash(rm *)", "Bash(sudo *)", "Read(./.env)", "Edit(./.env)"]
+  },
+  libre: {
+    allow: ["Read", "Edit", "Write", "Glob", "Grep", "Bash(*)", "WebFetch", "WebSearch"],
+    ask: [],
+    deny: ["Bash(rm -rf / *)", "Bash(sudo rm *)", "Read(./.env)"]
+  }
+};
+
+// Qué significa cada herramienta, en palabras simples.
+var EXPLICACIONES = {
+  "Read": "Leer archivos: el agente puede ver el contenido, sin cambiar nada.",
+  "Edit": "Editar archivos que ya existen.",
+  "Write": "Crear archivos nuevos.",
+  "Glob": "Buscar archivos por su nombre.",
+  "Grep": "Buscar texto dentro de los archivos.",
+  "WebFetch": "Leer páginas de internet.",
+  "WebSearch": "Buscar en internet.",
+  "TodoWrite": "Anotar tareas en su lista de pendientes.",
+  "Task": "Pedirle ayuda a otro agente para una subtarea.",
+  "NotebookEdit": "Editar cuadernos de Jupyter (archivos .ipynb).",
+  "BashOutput": "Ver lo que mostró un comando que ya corrió.",
+  "KillShell": "Parar un comando que está corriendo.",
+  "SlashCommand": "Usar comandos que empiezan con /."
+};
+
+// Las tres columnas: nombre interno, título y qué significa.
+var COLUMNAS = [
+  { clave: "allow", titulo: "Permitir", clase: "permitir",
+    desc: "El agente lo hace sin preguntar." },
+  { clave: "ask", titulo: "Preguntar", clase: "preguntar",
+    desc: "El agente te pregunta antes de hacerlo." },
+  { clave: "deny", titulo: "Negar", clase: "negar",
+    desc: "El agente NO puede hacerlo nunca. Gana sobre las otras dos." }
+];
+
+// ---------- Estado ----------
+
+// Acá guardamos los ajustes que trajimos del servidor.
+var ajustes = { permissions: { allow: [], ask: [], deny: [] } };
+
+// ---------- Explicar una regla ----------
+
+function explicar(regla) {
+  // 1) ¿La regla exacta está en la lista?
+  if (EXPLICACIONES[regla]) return EXPLICACIONES[regla];
+  // 2) ¿Empieza con una herramienta conocida?
+  if (regla.indexOf("Bash(") === 0) {
+    var dentro = regla.slice(5, -1);
+    return "Comando de terminal que empiece con «" + dentro + "». El * vale por cualquier cosa.";
+  }
+  if (regla.indexOf("Read(") === 0)
+    return "Leer solo estos archivos: " + regla.slice(5, -1) + ".";
+  if (regla.indexOf("Edit(") === 0)
+    return "Editar solo estos archivos: " + regla.slice(5, -1) + ".";
+  if (regla.indexOf("Write(") === 0)
+    return "Crear solo estos archivos: " + regla.slice(6, -1) + ".";
+  if (regla.indexOf("mcp__") === 0)
+    return "Herramienta de un servidor MCP conectado.";
+  // 3) No la conozco: lo digo sin inventar.
+  return "Regla para la herramienta «" + regla.split("(")[0] + "».";
+}
+
+// ---------- Dibujar la pantalla ----------
+
+function dibujar() {
+  var contenedor = document.getElementById("columnas");
+  contenedor.innerHTML = "";
+  COLUMNAS.forEach(function (col) {
+    var lista = ajustes.permissions[col.clave] || [];
+    var div = document.createElement("div");
+    div.className = "columna " + col.clase;
+
+    var html = "<h2>" + col.titulo + "</h2><p class='desc'>" + col.desc + "</p>";
+    lista.forEach(function (regla, i) {
+      html += "<div class='regla'>"
+        + "<button class='borrar' data-lista='" + col.clave + "' data-i='" + i + "'>Quitar</button>"
+        + "<input value='" + regla.replace(/"/g, "&quot;") + "' data-lista='" + col.clave + "' data-i='" + i + "'>"
+        + "<p class='que-hace'>" + explicar(regla) + "</p>"
+        + "</div>";
+    });
+    html += "<div class='agregar'>"
+      + "<input placeholder='Nueva regla, por ejemplo: Bash(git status)' data-nueva='" + col.clave + "'>"
+      + "<button data-agregar='" + col.clave + "'>Agregar</button>"
+      + "</div>";
+    div.innerHTML = html;
+    contenedor.appendChild(div);
+  });
+}
+
+// ---------- Hablar con el servidor ----------
+
+async function cargar() {
+  var resp = await fetch("/api/ajustes");
+  var data = await resp.json();
+  if (!data.ok) { mostrarMensaje("error", "No se pudo leer settings.json: " + data.error); return; }
+  ajustes = data.datos;
+  if (!ajustes.permissions) ajustes.permissions = { allow: [], ask: [], deny: [] };
+  dibujar();
+}
+
+async function guardar() {
+  var resp = await fetch("/api/ajustes", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(ajustes)
+  });
+  var data = await resp.json();
+  if (!data.ok) { mostrarMensaje("error", "No se guardó: " + data.error); return; }
+  mostrarMensaje("ok", "Guardado en settings.json.");
+  mostrarAvisos(data.avisos || []);
+}
+
+function mostrarMensaje(tipo, texto) {
+  var el = document.getElementById("mensaje");
+  el.className = tipo;
+  el.textContent = texto;
+}
+
+function mostrarAvisos(avisos) {
+  var el = document.getElementById("avisos");
+  el.innerHTML = "";
+  if (!avisos.length) { el.style.display = "none"; return; }
+  el.style.display = "block";
+  avisos.forEach(function (a) {
+    var li = document.createElement("li");
+    li.textContent = a;
+    el.appendChild(li);
+  });
+}
+
+// ---------- Acciones de los botones ----------
+
+// Un solo escucha para los clics dentro de las columnas (borrar y agregar).
+document.getElementById("columnas").addEventListener("click", function (e) {
+  var btn = e.target.closest("button");
+  if (!btn) return;
+  if (btn.className === "borrar") {
+    var lista = btn.dataset.lista;
+    ajustes.permissions[lista].splice(Number(btn.dataset.i), 1);
+    dibujar();
+  }
+  if (btn.dataset.agregar) {
+    var lista2 = btn.dataset.agregar;
+    var input = document.querySelector("input[data-nueva='" + lista2 + "']");
+    var valor = input.value.trim();
+    if (!valor) return;
+    ajustes.permissions[lista2].push(valor);
+    dibujar();
+  }
+});
+
+// Cuando editás una regla, se actualiza el estado y su explicación.
+document.getElementById("columnas").addEventListener("input", function (e) {
+  var input = e.target;
+  if (input.tagName !== "INPUT" || !input.dataset.lista) return;
+  var lista = input.dataset.lista;
+  ajustes.permissions[lista][Number(input.dataset.i)] = input.value;
+  var p = input.parentElement.querySelector(".que-hace");
+  if (p) p.textContent = explicar(input.value);
+});
+
+// Presets: llenan las tres columnas con un juego de reglas.
+document.querySelectorAll(".preset").forEach(function (btn) {
+  btn.addEventListener("click", function () {
+    var p = PRESETS[btn.dataset.preset];
+    ajustes.permissions = JSON.parse(JSON.stringify(p)); // copia, no referencia
+    document.querySelectorAll(".preset").forEach(function (b) { b.classList.remove("activo"); });
+    btn.classList.add("activo");
+    mostrarMensaje("ok", "Preset aplicado. Acordate de guardar.");
+    mostrarAvisos([]);
+    dibujar();
+  });
+});
+
+document.getElementById("btn-guardar").addEventListener("click", guardar);
+
+document.getElementById("btn-json").addEventListener("click", function () {
+  var pre = document.getElementById("json");
+  if (pre.style.display === "block") { pre.style.display = "none"; return; }
+  pre.textContent = JSON.stringify(ajustes, null, 2);
+  pre.style.display = "block";
+});
+
+document.getElementById("btn-descargar").addEventListener("click", function () {
+  var blob = new Blob([JSON.stringify(ajustes, null, 2)], { type: "application/json" });
+  var a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = "settings.json";
+  a.click();
+});
+
+document.getElementById("btn-recargar").addEventListener("click", cargar);
+
+// Al abrir la página, traemos los ajustes del archivo.
+cargar();
+</script>
+</body>
+</html>

@@ -1,0 +1,32 @@
+{
+    "model": "sonnet",
+    "permissions": {
+        "allow": [
+            "Read",
+            "Glob",
+            "Grep",
+            "Edit",
+            "Write",
+            "Bash(npm run *)",
+            "Bash(git status)",
+            "Bash(git diff)",
+            "Bash(git log *)",
+            "Bash(python *)",
+            "WebFetch",
+            "WebSearch"
+        ],
+        "ask": [
+            "Bash(git push *)",
+            "Bash(git commit *)",
+            "Bash(npm install *)",
+            "Bash(pip install *)"
+        ],
+        "deny": [
+            "Bash(rm -rf *)",
+            "Bash(rm *)",
+            "Bash(sudo *)",
+            "Read(./.env)",
+            "Edit(./.env)"
+        ]
+    }
+}
